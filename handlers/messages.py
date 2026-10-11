@@ -8,10 +8,10 @@ from utils.formatters import format_time_left, message_link
 
 def register_message_handlers(dp, contest_service: ContestService, bot):
     async def on_timer_update(remaining: int, finished: bool = False):
-        print(f"⏰ [TIMER] on_timer_update: remaining={remaining}, finished={finished}")
+        print(f" [TIMER] on_timer_update: remaining={remaining}, finished={finished}")
 
         if finished:
-            print(" [TIMER] Время вышло! Вызываем announce_winner()...")
+            print("🏆 [TIMER] Время вышло! Вызываем announce_winner()...")
             await announce_winner()
             return
 
@@ -24,10 +24,10 @@ def register_message_handlers(dp, contest_service: ContestService, bot):
 
         text = (
             f"⏳ <b>Конкурс!</b>\n\n"
-            f" Лидер: <a href='tg://user?id={contest_service.state['leader_id']}'>"
+            f"👑 Лидер: <a href='tg://user?id={contest_service.state['leader_id']}'>"
             f"{contest_service.state['leader_username'] or 'участник'}</a>\n"
             f"⏰ До конца: <b>{format_time_left(remaining)}</b>\n\n"
-            f"Отправьте сообщение, чтобы перебить лидера! "
+            f"Отправьте сообщение, чтобы перебить лидера! 🚀"
         )
 
         try:
@@ -44,7 +44,7 @@ def register_message_handlers(dp, contest_service: ContestService, bot):
                 print(f"❌ [TIMER] Ошибка: {e}")
 
     async def announce_winner():
-        print(" [ANNOUNCE] === НАЧИНАЕМ ОБЪЯВЛЕНИЕ ПОБЕДИТЕЛЯ ===")
+        print("🏆 [ANNOUNCE] === НАЧИНАЕМ ОБЪЯВЛЕНИЕ ПОБЕДИТЕЛЯ ===")
 
         try:
             chat_id = contest_service.state["chat_id"]
@@ -55,9 +55,9 @@ def register_message_handlers(dp, contest_service: ContestService, bot):
             winner_username = contest_service.state.get("leader_username", "Участник")
 
             print(f"📊 [ANNOUNCE] chat_id={chat_id}")
-            print(f"📊 [ANNOUNCE] winner_id={winner_id}")
+            print(f" [ANNOUNCE] winner_id={winner_id}")
             print(f"📊 [ANNOUNCE] winner_username={winner_username}")
-            print(f"📊 [ANNOUNCE] winner_msg_id={winner_msg_id}")
+            print(f" [ANNOUNCE] winner_msg_id={winner_msg_id}")
             print(f"📊 [ANNOUNCE] bot_msg_id={bot_msg_id}")
             print(f"📊 [ANNOUNCE] prize={prize}")
 
@@ -66,7 +66,7 @@ def register_message_handlers(dp, contest_service: ContestService, bot):
             if winner_msg_id:
                 try:
                     link = message_link(chat_id, winner_msg_id)
-                    print(f" [ANNOUNCE] Ссылка: {link}")
+                    print(f"🔗 [ANNOUNCE] Ссылка: {link}")
                 except Exception as e:
                     print(f"⚠️ [ANNOUNCE] Ошибка ссылки: {e}")
 
@@ -77,8 +77,7 @@ def register_message_handlers(dp, contest_service: ContestService, bot):
                 f"удержал лидерство и забирает приз!\n\n"
                 f"🎁 Приз: <b>{prize}</b>\n\n"
                 f"🔗 <a href='{link}'>Ссылка на победное сообщение</a>\n\n"
-                f"Приз выдаётся вручную администратором.\n\n"
-                f" Чат закрыт — писать могут только админы и владелец."
+                f"Приз выдаётся вручную администратором."
             )
 
             # Удаляем таймер
@@ -99,20 +98,26 @@ def register_message_handlers(dp, contest_service: ContestService, bot):
                     disable_web_page_preview=True,
                 )
                 print(f"✅ [ANNOUNCE] СООБЩЕНИЕ ОТПРАВЛЕНО! message_id={result.message_id}")
+
+                # ЗАКРЕПЛЯЕМ СООБЩЕНИЕ О ПОБЕДИТЕЛЕ
+                try:
+                    await bot.pin_chat_message(
+                        chat_id=chat_id,
+                        message_id=result.message_id,
+                        disable_notification=False,
+                    )
+                    print("✅ [ANNOUNCE] Сообщение о победителе ЗАКРЕПЛЕНО!")
+                except Exception as e:
+                    print(f"⚠️ [ANNOUNCE] Не удалось закрепить сообщение: {e}")
+                    print("   (Возможно, бот не имеет прав на закрепление сообщений)")
+
             except Exception as e:
-                print(f"❌ [ANNOUNCE] ОШИБКА ОТПРАВКИ: {e}")
+                print(f" [ANNOUNCE] ОШИБКА ОТПРАВКИ: {e}")
                 import traceback
                 traceback.print_exc()
 
-            # Блокируем чат
-            try:
-                await bot.set_chat_permissions(
-                    chat_id=chat_id,
-                    permissions=ChatPermissions(can_send_messages=False),
-                )
-                print("✅ [ANNOUNCE] Чат заблокирован")
-            except Exception as e:
-                print(f"⚠️ [ANNOUNCE] Не заблокировал чат: {e}")
+            # ЧАТ ОСТАЕТСЯ ОТКРЫТЫМ - не блокируем!
+            print("✅ [ANNOUNCE] Чат остается открытым")
 
             print("🏆 [ANNOUNCE] === ЗАВЕРШЕНО ===")
 
