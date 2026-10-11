@@ -27,7 +27,7 @@ def register_command_handlers(dp, contest_service: ContestService, admin_ids: li
             try:
                 duration = int(parts[1])
             except ValueError:
-                await message.answer("️ Неверный таймер. Пример: /start_play 120 NFT")
+                await message.answer("⚠️ Неверный таймер. Пример: /start_play 120 NFT")
                 return
 
         if len(parts) > 2:
@@ -38,9 +38,9 @@ def register_command_handlers(dp, contest_service: ContestService, admin_ids: li
         contest_service.state["chat_id"] = message.chat.id
 
         text = (
-            f"🎮 <b>Настройка игры</b>\n\n"
-            f" Длительность: <b>{format_time_left(duration)}</b>\n"
-            f" Приз: <b>{prize}</b>\n\n"
+            f" <b>Настройка игры</b>\n\n"
+            f"⏱ Длительность: <b>{format_time_left(duration)}</b>\n"
+            f"🎁 Приз: <b>{prize}</b>\n\n"
             f"Могут ли администраторы участвовать в перебиве?"
         )
 
@@ -54,11 +54,17 @@ def register_command_handlers(dp, contest_service: ContestService, admin_ids: li
         sent = await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
         contest_service.set_start_message(sent.message_id)
 
+        # Удаляем сообщение с командой
+        try:
+            await message.delete()
+        except Exception:
+            pass
+
     # ─── Кнопка: админы участвуют ───
     @dp.callback_query(F.data == "admins_yes")
     async def callback_admins_yes(callback: CallbackQuery):
         if callback.from_user.id not in admin_ids:
-            await callback.answer(" Только администратор.", show_alert=True)
+            await callback.answer("❌ Только администратор.", show_alert=True)
             return
 
         if contest_service.is_active:
@@ -75,23 +81,21 @@ def register_command_handlers(dp, contest_service: ContestService, admin_ids: li
 
         contest_service.start(chat_id, duration, prize, admins_allowed=True)
 
-        # НОВОЕ СООБЩЕНИЕ
         text = (
-            f" <b>Игра запущена!</b>\n\n"
+            f"🎮 <b>Игра запущена!</b>\n\n"
             f"⏱ Длительность: <b>{format_time_left(duration)}</b>\n"
             f"🎁 Приз: <b>{prize}</b>\n"
             f"✅ Задача: продержать своё сообщение самым последним, без перебивов.\n\n"
             f"👥 Участники: <b>Все</b> (включая администраторов)\n\n"
-            f"Удачи в бою ☘️"
+            f"Удачи в бою ️"
         )
 
         await callback.message.edit_text(text, parse_mode=ParseMode.HTML)
 
-        # Сообщение с таймером
         timer_text = (
             f"⏳ <b>Конкурс!</b>\n\n"
             f"⏰ До конца: <b>{format_time_left(duration)}</b>\n\n"
-            f"Отправьте сообщение, чтобы перебить лидера! "
+            f"Чтобы перебить лидера, отправьте любое сообщение "
         )
         sent = await callback.message.answer(timer_text, parse_mode=ParseMode.HTML)
         contest_service.set_bot_message(sent.message_id)
@@ -119,11 +123,10 @@ def register_command_handlers(dp, contest_service: ContestService, admin_ids: li
 
         contest_service.start(chat_id, duration, prize, admins_allowed=False)
 
-        # НОВОЕ СООБЩЕНИЕ (без админов)
         text = (
             f"🎮 <b>Игра запущена!</b>\n\n"
-            f"⏱ Длительность: <b>{format_time_left(duration)}</b>\n"
-            f"🎁 Приз: <b>{prize}</b>\n"
+            f" Длительность: <b>{format_time_left(duration)}</b>\n"
+            f" Приз: <b>{prize}</b>\n"
             f"✅ Задача: продержать своё сообщение самым последним, без перебивов.\n\n"
             f"👥 Участники: <b>Только обычные пользователи</b> (админы и создатель исключены)\n\n"
             f"Удачи в бою ☘️"
@@ -131,11 +134,10 @@ def register_command_handlers(dp, contest_service: ContestService, admin_ids: li
 
         await callback.message.edit_text(text, parse_mode=ParseMode.HTML)
 
-        # Сообщение с таймером
         timer_text = (
             f"⏳ <b>Конкурс!</b>\n\n"
-            f"⏰ До конца: <b>{format_time_left(duration)}</b>\n\n"
-            f"Отправьте сообщение, чтобы перебить лидера! 🚀"
+            f" До конца: <b>{format_time_left(duration)}</b>\n\n"
+            f"Чтобы перебить лидера, отправьте любое сообщение 🚀"
         )
         sent = await callback.message.answer(timer_text, parse_mode=ParseMode.HTML)
         contest_service.set_bot_message(sent.message_id)
@@ -158,7 +160,6 @@ def register_command_handlers(dp, contest_service: ContestService, admin_ids: li
 
         contest_service.start(message.chat.id, duration, prize, admins_allowed=True)
 
-        # НОВОЕ СООБЩЕНИЕ
         text = (
             f"🎮 <b>Игра запущена!</b>\n\n"
             f"⏱ Длительность: <b>{format_time_left(duration)}</b>\n"
@@ -170,16 +171,21 @@ def register_command_handlers(dp, contest_service: ContestService, admin_ids: li
         sent = await message.answer(text, parse_mode=ParseMode.HTML)
         contest_service.set_start_message(sent.message_id)
 
-        # Сообщение с таймером
         timer_text = (
             f"⏳ <b>Конкурс!</b>\n\n"
             f"⏰ До конца: <b>{format_time_left(duration)}</b>\n\n"
-            f"Отправьте сообщение, чтобы перебить лидера! "
+            f"Чтобы перебить лидера, отправьте любое сообщение "
         )
         timer_sent = await message.answer(timer_text, parse_mode=ParseMode.HTML)
         contest_service.set_bot_message(timer_sent.message_id)
 
-    # ─── /block_admin (быстрый запуск без админов) ───
+        # Удаляем сообщение с командой
+        try:
+            await message.delete()
+        except Exception:
+            pass
+
+    # ─── /block_admin (быстрый запуск без админов) ──
     @dp.message(Command("block_admin"))
     async def cmd_block_admin(message: Message):
         if message.from_user.id not in admin_ids:
@@ -195,7 +201,6 @@ def register_command_handlers(dp, contest_service: ContestService, admin_ids: li
 
         contest_service.start(message.chat.id, duration, prize, admins_allowed=False)
 
-        # НОВОЕ СООБЩЕНИЕ (без админов)
         text = (
             f" <b>Игра запущена!</b>\n\n"
             f"⏱ Длительность: <b>{format_time_left(duration)}</b>\n"
@@ -207,14 +212,19 @@ def register_command_handlers(dp, contest_service: ContestService, admin_ids: li
         sent = await message.answer(text, parse_mode=ParseMode.HTML)
         contest_service.set_start_message(sent.message_id)
 
-        # Сообщение с таймером
         timer_text = (
             f"⏳ <b>Конкурс!</b>\n\n"
             f"⏰ До конца: <b>{format_time_left(duration)}</b>\n\n"
-            f"Отправьте сообщение, чтобы перебить лидера! 🚀"
+            f"Чтобы перебить лидера, отправьте любое сообщение 🚀"
         )
         timer_sent = await message.answer(timer_text, parse_mode=ParseMode.HTML)
         contest_service.set_bot_message(timer_sent.message_id)
+
+        # Удаляем сообщение с командой
+        try:
+            await message.delete()
+        except Exception:
+            pass
 
     # ─── /stop_play ───
     @dp.message(Command("stop_play"))
@@ -233,7 +243,13 @@ def register_command_handlers(dp, contest_service: ContestService, admin_ids: li
         except Exception:
             pass
 
-        await message.answer(" Игра остановлена. Чат открыт. 🔓")
+        await message.answer("🛑 Перебив завершён.")
+
+        # Удаляем сообщение с командой
+        try:
+            await message.delete()
+        except Exception:
+            pass
 
     # ─── /status ───
     @dp.message(Command("status"))
@@ -245,9 +261,15 @@ def register_command_handlers(dp, contest_service: ContestService, admin_ids: li
         remaining = contest_service.get_remaining_seconds()
         admins_text = "Все" if contest_service.state["admins_allowed"] else "Только обычные"
         await message.answer(
-            f"📊 <b>Статус игры</b>\n\n"
+            f" <b>Статус игры</b>\n\n"
             f"👑 Лидер: @{contest_service.state['leader_username'] or 'неизвестно'}\n"
-            f"⏰ Осталось: {format_time_left(int(remaining))}\n"
+            f" Осталось: {format_time_left(int(remaining))}\n"
             f"👥 Участники: {admins_text}",
             parse_mode=ParseMode.HTML,
         )
+
+        # Удаляем сообщение с командой
+        try:
+            await message.delete()
+        except Exception:
+            pass

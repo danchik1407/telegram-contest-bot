@@ -1,5 +1,5 @@
 from aiogram import F
-from aiogram.types import Message, ChatPermissions
+from aiogram.types import Message
 from aiogram.enums import ParseMode
 
 from services.contest import ContestService
@@ -11,7 +11,7 @@ def register_message_handlers(dp, contest_service: ContestService, bot):
         print(f"⏰ [TIMER] on_timer_update: remaining={remaining}, finished={finished}")
 
         if finished:
-            print(" [TIMER] Время вышло! Вызываем announce_winner()...")
+            print("🏆 [TIMER] Время вышло! Вызываем announce_winner()...")
             await announce_winner()
             return
 
@@ -22,12 +22,15 @@ def register_message_handlers(dp, contest_service: ContestService, bot):
             print("⚠️ [TIMER] bot_msg_id отсутствует")
             return
 
+        username = contest_service.state['leader_username'] or 'участник'
+        if not username.startswith('@') and not username.startswith('tg://'):
+            username = f"@{username}"
+
         text = (
-            f"⏳ <b>Конкурс!</b>\n\n"
-            f" Лидер: <a href='tg://user?id={contest_service.state['leader_id']}'>"
-            f"{contest_service.state['leader_username'] or 'участник'}</a>\n"
-            f"⏰ До конца: <b>{format_time_left(remaining)}</b>\n\n"
-            f"Отправьте сообщение, чтобы перебить лидера! "
+            f"<b>Перебито ✅️</b>\n\n"
+            f"👑 Лидер: <a href='tg://user?id={contest_service.state['leader_id']}'>{username}</a>\n"
+            f"⏰ Продержаться: <b>{format_time_left(remaining)}</b>\n\n"
+            f"Чтобы перебить лидера, отправьте любое сообщение 🚀"
         )
 
         try:
@@ -41,7 +44,7 @@ def register_message_handlers(dp, contest_service: ContestService, bot):
             print(f"✅ [TIMER] Таймер обновлен: {remaining} сек")
         except Exception as e:
             if "message is not modified" not in str(e).lower():
-                print(f" [TIMER] Ошибка: {e}")
+                print(f"❌ [TIMER] Ошибка: {e}")
 
     async def announce_winner():
         print("🏆 [ANNOUNCE] === НАЧИНАЕМ ОБЪЯВЛЕНИЕ ПОБЕДИТЕЛЯ ===")
@@ -54,29 +57,20 @@ def register_message_handlers(dp, contest_service: ContestService, bot):
             prize = contest_service.state.get("prize", "Сюрприз")
             winner_username = contest_service.state.get("leader_username", "Участник")
 
-            print(f"📊 [ANNOUNCE] chat_id={chat_id}")
-            print(f"📊 [ANNOUNCE] winner_id={winner_id}")
-            print(f"📊 [ANNOUNCE] winner_username={winner_username}")
-            print(f"📊 [ANNOUNCE] winner_msg_id={winner_msg_id}")
-            print(f"📊 [ANNOUNCE] bot_msg_id={bot_msg_id}")
-            print(f"📊 [ANNOUNCE] prize={prize}")
-
             # Ссылка на сообщение
             link = "неизвестно"
             if winner_msg_id:
                 try:
                     link = message_link(chat_id, winner_msg_id)
-                    print(f" [ANNOUNCE] Ссылка: {link}")
+                    print(f"🔗 [ANNOUNCE] Ссылка: {link}")
                 except Exception as e:
                     print(f"⚠️ [ANNOUNCE] Ошибка ссылки: {e}")
 
+            # НОВЫЙ ТЕКСТ РЕЗУЛЬТАТОВ
             text = (
-                f"🏆 <b>ПОБЕДИТЕЛЬ КОНКУРСА!</b>\n\n"
-                f"👑 <a href='tg://user?id={winner_id}'>"
-                f"{winner_username}</a> "
-                f"удержал лидерство и забирает приз!\n\n"
+                f"🏆 <b>ПОБЕДИТЕЛЬ:</b> <a href='tg://user?id={winner_id}'>{winner_username}</a> удержавший последнее сообщение 👑\n\n"
                 f"🎁 Приз: <b>{prize}</b>\n\n"
-                f" <a href='{link}'>Ссылка на победное сообщение</a>\n\n"
+                f"🔗 <a href='{link}'>Ссылка на победное сообщение</a>\n\n"
                 f"Приз выдаётся вручную администратором."
             )
 
@@ -108,7 +102,7 @@ def register_message_handlers(dp, contest_service: ContestService, bot):
                     )
                     print("✅ [ANNOUNCE] Сообщение о победителе ЗАКРЕПЛЕНО!")
                 except Exception as e:
-                    print(f"️ [ANNOUNCE] Не удалось закрепить сообщение: {e}")
+                    print(f"⚠️ [ANNOUNCE] Не удалось закрепить сообщение: {e}")
 
             except Exception as e:
                 print(f"❌ [ANNOUNCE] ОШИБКА ОТПРАВКИ: {e}")
@@ -172,13 +166,14 @@ def register_message_handlers(dp, contest_service: ContestService, bot):
             message_id=message.message_id,
         )
 
+        # НОВЫЙ ТЕКСТ ПЕРЕБИТИЯ
+        user_display = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
+
         text = (
-            f"🔄 <b>Перебито!</b>\n\n"
-            f"👑 Новый лидер: "
-            f"<a href='tg://user?id={message.from_user.id}'>"
-            f"@{message.from_user.username or message.from_user.first_name}</a>\n"
-            f"⏰ До конца: <b>{format_time_left(contest_service.duration)}</b>\n\n"
-            f"Отправьте сообщение, чтобы забрать приз! 🎁"
+            f"<b>Перебито ✅️</b>\n\n"
+            f"👑 Лидер: <a href='tg://user?id={message.from_user.id}'>{user_display}</a>\n"
+            f"⏰ Продержаться: <b>{format_time_left(contest_service.duration)}</b>\n\n"
+            f"Чтобы перебить лидера, отправьте любое сообщение 🚀"
         )
 
         old_bot_msg_id = contest_service.state["bot_message_id"]
