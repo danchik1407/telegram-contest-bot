@@ -41,20 +41,21 @@ class ContestService:
         self.state["admins_allowed"] = admins_allowed
         self.state["prize"] = prize
         self.duration = duration
-        logger.info(f"Конкурс начат: чат={chat_id}, приз={prize}, админы={admins_allowed}")
+        logger.info(f"Конкурс начат: чат={chat_id}, приз={prize}, админы={admins_allowed}, длительность={duration}сек")
 
     def stop(self) -> None:
         self.state["active"] = False
         self.state["ended"] = True
         if self._update_task and not self._update_task.done():
             self._update_task.cancel()
-        logger.info("Конкурс остановлен")
+        logger.info("Конкурс остановлен (stop вызван)")
 
     def set_leader(self, user_id: int, username: Optional[str], message_id: int) -> None:
         self.state["leader_id"] = user_id
         self.state["leader_username"] = username
         self.state["leader_message_id"] = message_id
         self.state["end_time"] = datetime.now() + timedelta(seconds=self.duration)
+        logger.info(f"Новый лидер: {username} (ID: {user_id})")
 
     def is_same_leader(self, user_id: int) -> bool:
         return self.state["leader_id"] == user_id
@@ -76,16 +77,28 @@ class ContestService:
         self._update_task = asyncio.create_task(self._timer_loop(callback))
 
     async def _timer_loop(self, callback) -> None:
+        print("🔄 [TIMER_LOOP] Запущен цикл таймера")
         try:
             while self.is_active:
                 remaining = self.get_remaining_seconds()
+                print(f"🔄 [TIMER_LOOP] Осталось: {remaining:.1f} сек, active={self.is_active}")
+
                 if remaining <= 0:
+                    print("⏰ [TIMER_LOOP] Время вышло (remaining <= 0)")
                     break
+
                 await callback(int(remaining))
                 await asyncio.sleep(self.update_interval)
+
             if self.is_active:
+                print(" [TIMER_LOOP] Вызываем callback(0, finished=True)")
                 await callback(0, finished=True)
+            else:
+                print("🛑 [TIMER_LOOP] Конкурс не активен, finished не вызываем")
+
         except asyncio.CancelledError:
-            logger.debug("Таймер отменён")
+            print("❌ [TIMER_LOOP] Таймер отменён (CancelledError)")
         except Exception as e:
-            logger.error(f"Ошибка таймера: {e}")
+            print(f"❌ [TIMER_LOOP] Ошибка таймера: {e}")
+            import traceback
+            traceback.print_exc()
