@@ -1,104 +1,253 @@
-import asyncio
-import logging
-from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+from aiogram import F
+from aiogram.types import Message, ChatPermissions, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command
+from aiogram.enums import ParseMode
 
-logger = logging.getLogger(__name__)
+from services.contest import ContestService
+from utils.formatters import format_time_left
 
 
-class ContestService:
-    def __init__(self, duration: int, update_interval: int):
-        self.duration = duration
-        self.update_interval = update_interval
-        self.state: Dict[str, Any] = self._reset_state()
-        self._update_task: Optional[asyncio.Task] = None
+def register_command_handlers(dp, contest_service: ContestService, admin_ids: list):
+    # ─── /start_play [таймер] [приз] ───
+    @dp.message(Command("start_play"))
+    async def cmd_start_play(message: Message):
+        if message.from_user.id not in admin_ids:
+            await message.answer("❌ Только администратор может запустить игру.")
+            return
 
-    def _reset_state(self) -> Dict[str, Any]:
-        return {
-            "active": False,
-            "ended": False,
-            "chat_id": None,
-            "leader_id": None,
-            "leader_username": None,
-            "leader_message_id": None,
-            "end_time": None,
-            "bot_message_id": None,
-            "start_message_id": None,
-            "admins_allowed": True,
-            "prize": "Сюрприз",
-            "pending_duration": None,
-        }
+        if contest_service.is_active:
+            await message.answer("⚠️ Игра уже идёт! Сначала: /stop_play")
+            return
 
-    @property
-    def is_active(self) -> bool:
-        return self.state["active"] and not self.state["ended"]
+        parts = message.text.split()
+        duration = contest_service.duration
+        prize = "Сюрприз"
 
-    def start(self, chat_id: int, duration: int, prize: str, admins_allowed: bool) -> None:
-        self.state = self._reset_state()
-        self.state["active"] = True
-        self.state["chat_id"] = chat_id
-        self.state["end_time"] = datetime.now() + timedelta(seconds=duration)
-        self.state["admins_allowed"] = admins_allowed
-        self.state["prize"] = prize
-        self.duration = duration
-        logger.info(f"Конкурс начат: чат={chat_id}, приз={prize}, админы={admins_allowed}, длительность={duration}сек")
+        if len(parts) > 1:
+            try:
+                duration = int(parts[1])
+            except ValueError:
+                await message.answer("️ Неверный таймер. Пример: /start_play 120 NFT")
+                return
 
-    def stop(self) -> None:
-        self.state["active"] = False
-        self.state["ended"] = True
-        if self._update_task and not self._update_task.done():
-            self._update_task.cancel()
-        logger.info("Конкурс остановлен (stop вызван)")
+        if len(parts) > 2:
+            prize = " ".join(parts[2:])
 
-    def set_leader(self, user_id: int, username: Optional[str], message_id: int) -> None:
-        self.state["leader_id"] = user_id
-        self.state["leader_username"] = username
-        self.state["leader_message_id"] = message_id
-        self.state["end_time"] = datetime.now() + timedelta(seconds=self.duration)
-        logger.info(f"Новый лидер: {username} (ID: {user_id})")
+        contest_service.state["pending_duration"] = duration
+        contest_service.state["prize"] = prize
+        contest_service.state["chat_id"] = message.chat.id
 
-    def is_same_leader(self, user_id: int) -> bool:
-        return self.state["leader_id"] == user_id
+        text = (
+            f"🎮 <b>Настройка игры</b>\n\n"
+            f" Длительность: <b>{format_time_left(duration)}</b>\n"
+            f" Приз: <b>{prize}</b>\n\n"
+            f"Могут ли администраторы участвовать в перебиве?"
+        )
 
-    def set_bot_message(self, message_id: int) -> None:
-        self.state["bot_message_id"] = message_id
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Да, все участвуют", callback_data="admins_yes"),
+                InlineKeyboardButton(text="❌ Нет, только обычные", callback_data="admins_no"),
+            ]
+        ])
 
-    def set_start_message(self, message_id: int) -> None:
-        self.state["start_message_id"] = message_id
+        sent = await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        contest_service.set_start_message(sent.message_id)
 
-    def get_remaining_seconds(self) -> float:
-        if not self.state["end_time"]:
-            return 0
-        return (self.state["end_time"] - datetime.now()).total_seconds()
+    # ─── Кнопка: админы участвуют ───
+    @dp.callback_query(F.data == "admins_yes")
+    async def callback_admins_yes(callback: CallbackQuery):
+        if callback.from_user.id not in admin_ids:
+            await callback.answer(" Только администратор.", show_alert=True)
+            return
 
-    async def start_timer_task(self, callback) -> None:
-        if self._update_task and not self._update_task.done():
-            self._update_task.cancel()
-        self._update_task = asyncio.create_task(self._timer_loop(callback))
+        if contest_service.is_active:
+            await callback.answer("⚠️ Игра уже запущена!", show_alert=True)
+            return
 
-    async def _timer_loop(self, callback) -> None:
-        print("🔄 [TIMER_LOOP] Запущен цикл таймера")
+        duration = contest_service.state.get("pending_duration", contest_service.duration)
+        prize = contest_service.state.get("prize", "Сюрприз")
+        chat_id = contest_service.state.get("chat_id")
+
+        if not chat_id:
+            await callback.answer("️ Ошибка: чат не найден.", show_alert=True)
+            return
+
+        contest_service.start(chat_id, duration, prize, admins_allowed=True)
+
+        # НОВОЕ СООБЩЕНИЕ
+        text = (
+            f" <b>Игра запущена!</b>\n\n"
+            f"⏱ Длительность: <b>{format_time_left(duration)}</b>\n"
+            f"🎁 Приз: <b>{prize}</b>\n"
+            f"✅ Задача: продержать своё сообщение самым последним, без перебивов.\n\n"
+            f"👥 Участники: <b>Все</b> (включая администраторов)\n\n"
+            f"Удачи в бою ☘️"
+        )
+
+        await callback.message.edit_text(text, parse_mode=ParseMode.HTML)
+
+        # Сообщение с таймером
+        timer_text = (
+            f"⏳ <b>Конкурс!</b>\n\n"
+            f"⏰ До конца: <b>{format_time_left(duration)}</b>\n\n"
+            f"Отправьте сообщение, чтобы перебить лидера! "
+        )
+        sent = await callback.message.answer(timer_text, parse_mode=ParseMode.HTML)
+        contest_service.set_bot_message(sent.message_id)
+
+        await callback.answer()
+
+    # ─── Кнопка: админы НЕ участвуют ───
+    @dp.callback_query(F.data == "admins_no")
+    async def callback_admins_no(callback: CallbackQuery):
+        if callback.from_user.id not in admin_ids:
+            await callback.answer("❌ Только администратор.", show_alert=True)
+            return
+
+        if contest_service.is_active:
+            await callback.answer("⚠️ Игра уже запущена!", show_alert=True)
+            return
+
+        duration = contest_service.state.get("pending_duration", contest_service.duration)
+        prize = contest_service.state.get("prize", "Сюрприз")
+        chat_id = contest_service.state.get("chat_id")
+
+        if not chat_id:
+            await callback.answer("⚠️ Ошибка: чат не найден.", show_alert=True)
+            return
+
+        contest_service.start(chat_id, duration, prize, admins_allowed=False)
+
+        # НОВОЕ СООБЩЕНИЕ (без админов)
+        text = (
+            f"🎮 <b>Игра запущена!</b>\n\n"
+            f"⏱ Длительность: <b>{format_time_left(duration)}</b>\n"
+            f"🎁 Приз: <b>{prize}</b>\n"
+            f"✅ Задача: продержать своё сообщение самым последним, без перебивов.\n\n"
+            f"👥 Участники: <b>Только обычные пользователи</b> (админы и создатель исключены)\n\n"
+            f"Удачи в бою ☘️"
+        )
+
+        await callback.message.edit_text(text, parse_mode=ParseMode.HTML)
+
+        # Сообщение с таймером
+        timer_text = (
+            f"⏳ <b>Конкурс!</b>\n\n"
+            f"⏰ До конца: <b>{format_time_left(duration)}</b>\n\n"
+            f"Отправьте сообщение, чтобы перебить лидера! 🚀"
+        )
+        sent = await callback.message.answer(timer_text, parse_mode=ParseMode.HTML)
+        contest_service.set_bot_message(sent.message_id)
+
+        await callback.answer()
+
+    # ─── /play_game (быстрый запуск с админами) ───
+    @dp.message(Command("play_game"))
+    async def cmd_play_game(message: Message):
+        if message.from_user.id not in admin_ids:
+            await message.answer("❌ Только администратор.")
+            return
+
+        if contest_service.is_active:
+            await message.answer("⚠️ Игра уже идёт! /stop_play")
+            return
+
+        duration = contest_service.duration
+        prize = contest_service.state.get("prize", "Сюрприз")
+
+        contest_service.start(message.chat.id, duration, prize, admins_allowed=True)
+
+        # НОВОЕ СООБЩЕНИЕ
+        text = (
+            f"🎮 <b>Игра запущена!</b>\n\n"
+            f"⏱ Длительность: <b>{format_time_left(duration)}</b>\n"
+            f"🎁 Приз: <b>{prize}</b>\n"
+            f"✅ Задача: продержать своё сообщение самым последним, без перебивов.\n\n"
+            f"👥 Участники: <b>Все</b> (включая администраторов)\n\n"
+            f"Удачи в бою ☘️"
+        )
+        sent = await message.answer(text, parse_mode=ParseMode.HTML)
+        contest_service.set_start_message(sent.message_id)
+
+        # Сообщение с таймером
+        timer_text = (
+            f"⏳ <b>Конкурс!</b>\n\n"
+            f"⏰ До конца: <b>{format_time_left(duration)}</b>\n\n"
+            f"Отправьте сообщение, чтобы перебить лидера! "
+        )
+        timer_sent = await message.answer(timer_text, parse_mode=ParseMode.HTML)
+        contest_service.set_bot_message(timer_sent.message_id)
+
+    # ─── /block_admin (быстрый запуск без админов) ───
+    @dp.message(Command("block_admin"))
+    async def cmd_block_admin(message: Message):
+        if message.from_user.id not in admin_ids:
+            await message.answer("❌ Только администратор.")
+            return
+
+        if contest_service.is_active:
+            await message.answer("⚠️ Игра уже идёт! /stop_play")
+            return
+
+        duration = contest_service.duration
+        prize = contest_service.state.get("prize", "Сюрприз")
+
+        contest_service.start(message.chat.id, duration, prize, admins_allowed=False)
+
+        # НОВОЕ СООБЩЕНИЕ (без админов)
+        text = (
+            f" <b>Игра запущена!</b>\n\n"
+            f"⏱ Длительность: <b>{format_time_left(duration)}</b>\n"
+            f"🎁 Приз: <b>{prize}</b>\n"
+            f"✅ Задача: продержать своё сообщение самым последним, без перебивов.\n\n"
+            f"👥 Участники: <b>Только обычные пользователи</b> (админы и создатель исключены)\n\n"
+            f"Удачи в бою ☘️"
+        )
+        sent = await message.answer(text, parse_mode=ParseMode.HTML)
+        contest_service.set_start_message(sent.message_id)
+
+        # Сообщение с таймером
+        timer_text = (
+            f"⏳ <b>Конкурс!</b>\n\n"
+            f"⏰ До конца: <b>{format_time_left(duration)}</b>\n\n"
+            f"Отправьте сообщение, чтобы перебить лидера! 🚀"
+        )
+        timer_sent = await message.answer(timer_text, parse_mode=ParseMode.HTML)
+        contest_service.set_bot_message(timer_sent.message_id)
+
+    # ─── /stop_play ───
+    @dp.message(Command("stop_play"))
+    async def cmd_stop_play(message: Message):
+        if message.from_user.id not in admin_ids:
+            await message.answer("❌ Только администратор.")
+            return
+
+        contest_service.stop()
+
         try:
-            while self.is_active:
-                remaining = self.get_remaining_seconds()
-                print(f"🔄 [TIMER_LOOP] Осталось: {remaining:.1f} сек, active={self.is_active}")
+            await message.bot.set_chat_permissions(
+                chat_id=message.chat.id,
+                permissions=ChatPermissions(can_send_messages=True),
+            )
+        except Exception:
+            pass
 
-                if remaining <= 0:
-                    print("⏰ [TIMER_LOOP] Время вышло (remaining <= 0)")
-                    break
+        await message.answer(" Игра остановлена. Чат открыт. 🔓")
 
-                await callback(int(remaining))
-                await asyncio.sleep(self.update_interval)
+    # ─── /status ───
+    @dp.message(Command("status"))
+    async def cmd_status(message: Message):
+        if not contest_service.is_active:
+            await message.answer("Игра не активна. /start_play")
+            return
 
-            if self.is_active:
-                print(" [TIMER_LOOP] Вызываем callback(0, finished=True)")
-                await callback(0, finished=True)
-            else:
-                print("🛑 [TIMER_LOOP] Конкурс не активен, finished не вызываем")
-
-        except asyncio.CancelledError:
-            print("❌ [TIMER_LOOP] Таймер отменён (CancelledError)")
-        except Exception as e:
-            print(f"❌ [TIMER_LOOP] Ошибка таймера: {e}")
-            import traceback
-            traceback.print_exc()
+        remaining = contest_service.get_remaining_seconds()
+        admins_text = "Все" if contest_service.state["admins_allowed"] else "Только обычные"
+        await message.answer(
+            f"📊 <b>Статус игры</b>\n\n"
+            f"👑 Лидер: @{contest_service.state['leader_username'] or 'неизвестно'}\n"
+            f"⏰ Осталось: {format_time_left(int(remaining))}\n"
+            f"👥 Участники: {admins_text}",
+            parse_mode=ParseMode.HTML,
+        )
