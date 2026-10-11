@@ -9,7 +9,7 @@ from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramConflictError
 
 from config import BOT_TOKEN, ADMIN_IDS, CONTEST_DURATION, UPDATE_INTERVAL
-from services.contest import ContestService
+from services.contest import ContestManager
 from handlers.commands import register_command_handlers
 from handlers.messages import register_message_handlers
 
@@ -20,19 +20,16 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Глобальная переменная для отслеживания состояния
 bot_instance = None
 dp_instance = None
-contest_service_instance = None
+contest_manager_instance = None
 
 
 async def handle_health(request):
-    """Health check endpoint для UptimeRobot."""
-    return web.Response(text="Bot is running! 🤖")
+    return web.Response(text="Bot is running!")
 
 
 async def start_http_server():
-    """Запускаем HTTP-сервер на порту из переменной окружения."""
     port = int(os.environ.get('PORT', 10000))
     app = web.Application()
     app.router.add_get('/', handle_health)
@@ -45,27 +42,25 @@ async def start_http_server():
 
 
 async def main():
-    global bot_instance, dp_instance, contest_service_instance
+    global bot_instance, dp_instance, contest_manager_instance
 
-    # Создаем бота и диспетчер
     bot_instance = Bot(
         token=BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
     dp_instance = Dispatcher()
 
-    contest_service_instance = ContestService(
+    # Создаём менеджер конкурсов (вместо одного сервиса)
+    contest_manager_instance = ContestManager(
         duration=CONTEST_DURATION,
         update_interval=UPDATE_INTERVAL
     )
 
-    register_command_handlers(dp_instance, contest_service_instance, ADMIN_IDS)
-    register_message_handlers(dp_instance, contest_service_instance, bot_instance)
+    register_command_handlers(dp_instance, contest_manager_instance, ADMIN_IDS)
+    register_message_handlers(dp_instance, contest_manager_instance, bot_instance)
 
-    # Запускаем HTTP-сервер
     await start_http_server()
 
-    # Запускаем polling с обработкой конфликтов
     max_retries = 5
     retry_count = 0
 
@@ -73,38 +68,32 @@ async def main():
         try:
             logger.info("Запускаем polling...")
             await dp_instance.start_polling(bot_instance)
-            break  # Если polling завершился нормально, выходим из цикла
+            break
         except TelegramConflictError as e:
             retry_count += 1
-            logger.warning(f"Конфликт polling (попытка {retry_count}/{max_retries}): {e}")
+            logger.warning(f"Конфликт polling ({retry_count}/{max_retries}): {e}")
             if retry_count >= max_retries:
-                logger.error("Превышено количество попыток. Завершаем работу.")
+                logger.error("Превышено количество попыток.")
                 break
-            # Ждем перед повторной попыткой
             await asyncio.sleep(5)
-            logger.info(f"Повторная попытка через 5 секунд...")
         except Exception as e:
-            logger.error(f"Критическая ошибка polling: {e}")
+            logger.error(f"Критическая ошибка: {e}")
             break
 
-    # Закрываем бота
     await bot_instance.session.close()
-    logger.info("Бот завершен")
 
 
 def shutdown_handler(signum, frame):
-    """Обработчик завершения процесса."""
-    logger.info("Получен сигнал завершения. Корректно завершаем работу...")
+    logger.info("Получен сигнал завершения.")
     if bot_instance:
         asyncio.create_task(bot_instance.session.close())
 
 
 if __name__ == "__main__":
-    # Регистрируем обработчики сигналов для корректного завершения
     signal.signal(signal.SIGTERM, shutdown_handler)
     signal.signal(signal.SIGINT, shutdown_handler)
 
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Бот остановлен пользователем")
+        logger.info("Бот остановлен")

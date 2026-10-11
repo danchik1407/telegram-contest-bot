@@ -3,24 +3,25 @@ from aiogram.types import Message, ChatPermissions, CallbackQuery, InlineKeyboar
 from aiogram.filters import Command
 from aiogram.enums import ParseMode
 
-from services.contest import ContestService
+from services.contest import ContestManager
 from utils.formatters import format_time_left
 
 
-def register_command_handlers(dp, contest_service: ContestService, admin_ids: list):
-    # ─── /start_play [таймер] [приз] ───
+def register_command_handlers(dp, contest_manager: ContestManager, admin_ids: list):
     @dp.message(Command("start_play"))
     async def cmd_start_play(message: Message):
         if message.from_user.id not in admin_ids:
-            await message.answer("❌ Только администратор может запустить игру.")
+            await message.answer(" Только администратор может запустить игру.")
             return
 
-        if contest_service.is_active:
-            await message.answer("⚠️ Игра уже идёт! Сначала: /stop_play")
+        service = contest_manager.get_service(message.chat.id)
+
+        if service.is_active:
+            await message.answer("⚠️ Игра уже идёт в этом чате! Сначала: /stop_play")
             return
 
         parts = message.text.split()
-        duration = contest_service.duration
+        duration = service.duration
         prize = "Сюрприз"
 
         if len(parts) > 1:
@@ -33,53 +34,63 @@ def register_command_handlers(dp, contest_service: ContestService, admin_ids: li
         if len(parts) > 2:
             prize = " ".join(parts[2:])
 
-        contest_service.state["pending_duration"] = duration
-        contest_service.state["prize"] = prize
-        contest_service.state["chat_id"] = message.chat.id
+        service.state["pending_duration"] = duration
+        service.state["prize"] = prize
+        service.state["chat_id"] = message.chat.id
 
         text = (
-            f" <b>Настройка игры</b>\n\n"
+            f"🎮 <b>Настройка игры</b>\n\n"
             f"⏱ Длительность: <b>{format_time_left(duration)}</b>\n"
             f"🎁 Приз: <b>{prize}</b>\n\n"
             f"Могут ли администраторы участвовать в перебиве?"
         )
 
+        # ИСПРАВЛЕНО: используем хэш chat_id для callback_data
+        chat_hash = str(abs(message.chat.id))[:10]
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(text="✅ Да, все участвуют", callback_data="admins_yes"),
-                InlineKeyboardButton(text="❌ Нет, только обычные", callback_data="admins_no"),
+                InlineKeyboardButton(text="✅ Да, все участвуют", callback_data=f"ay_{chat_hash}"),
+                InlineKeyboardButton(text="❌ Нет, только обычные", callback_data=f"an_{chat_hash}"),
             ]
         ])
 
         sent = await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
-        contest_service.set_start_message(sent.message_id)
+        service.set_start_message(sent.message_id)
 
-        # Удаляем сообщение с командой
         try:
             await message.delete()
         except Exception:
             pass
 
-    # ─── Кнопка: админы участвуют ───
-    @dp.callback_query(F.data == "admins_yes")
+    @dp.callback_query(F.data.startswith("ay_"))
     async def callback_admins_yes(callback: CallbackQuery):
+        chat_hash = callback.data.split("_")[1]
+
+        # Находим chat_id по хэшу
+        chat_id = None
+        for cid, service in contest_manager._services.items():
+            if str(abs(cid))[:10] == chat_hash:
+                chat_id = cid
+                break
+
+        if chat_id is None:
+            await callback.answer("️ Ошибка: чат не найден.", show_alert=True)
+            return
+
+        service = contest_manager.get_service(chat_id)
+
         if callback.from_user.id not in admin_ids:
             await callback.answer("❌ Только администратор.", show_alert=True)
             return
 
-        if contest_service.is_active:
+        if service.is_active:
             await callback.answer("⚠️ Игра уже запущена!", show_alert=True)
             return
 
-        duration = contest_service.state.get("pending_duration", contest_service.duration)
-        prize = contest_service.state.get("prize", "Сюрприз")
-        chat_id = contest_service.state.get("chat_id")
+        duration = service.state.get("pending_duration", service.duration)
+        prize = service.state.get("prize", "Сюрприз")
 
-        if not chat_id:
-            await callback.answer("️ Ошибка: чат не найден.", show_alert=True)
-            return
-
-        contest_service.start(chat_id, duration, prize, admins_allowed=True)
+        service.start(chat_id, duration, prize, admins_allowed=True)
 
         text = (
             f"🎮 <b>Игра запущена!</b>\n\n"
@@ -87,7 +98,57 @@ def register_command_handlers(dp, contest_service: ContestService, admin_ids: li
             f"🎁 Приз: <b>{prize}</b>\n"
             f"✅ Задача: продержать своё сообщение самым последним, без перебивов.\n\n"
             f"👥 Участники: <b>Все</b> (включая администраторов)\n\n"
-            f"Удачи в бою ️"
+            f"Удачи в бою ☘️"
+        )
+
+        await callback.message.edit_text(text, parse_mode=ParseMode.HTML)
+
+        timer_text = (
+            f"⏳ <b>Конкурс!</b>\n\n"
+            f"⏰ До конца: <b>{format_time_left(duration)}</b>\n\n"
+            f"Чтобы перебить лидера, отправьте любое сообщение 🚀"
+        )
+        sent = await callback.message.answer(timer_text, parse_mode=ParseMode.HTML)
+        service.set_bot_message(sent.message_id)
+
+        await callback.answer()
+
+    @dp.callback_query(F.data.startswith("an_"))
+    async def callback_admins_no(callback: CallbackQuery):
+        chat_hash = callback.data.split("_")[1]
+
+        chat_id = None
+        for cid, service in contest_manager._services.items():
+            if str(abs(cid))[:10] == chat_hash:
+                chat_id = cid
+                break
+
+        if chat_id is None:
+            await callback.answer("⚠️ Ошибка: чат не найден.", show_alert=True)
+            return
+
+        service = contest_manager.get_service(chat_id)
+
+        if callback.from_user.id not in admin_ids:
+            await callback.answer("❌ Только администратор.", show_alert=True)
+            return
+
+        if service.is_active:
+            await callback.answer("⚠️ Игра уже запущена!", show_alert=True)
+            return
+
+        duration = service.state.get("pending_duration", service.duration)
+        prize = service.state.get("prize", "Сюрприз")
+
+        service.start(chat_id, duration, prize, admins_allowed=False)
+
+        text = (
+            f"🎮 <b>Игра запущена!</b>\n\n"
+            f"⏱ Длительность: <b>{format_time_left(duration)}</b>\n"
+            f"🎁 Приз: <b>{prize}</b>\n"
+            f"✅ Задача: продержать своё сообщение самым последним, без перебивов.\n\n"
+            f"👥 Участники: <b>Только обычные пользователи</b> (админы и создатель исключены)\n\n"
+            f"Удачи в бою ☘️"
         )
 
         await callback.message.edit_text(text, parse_mode=ParseMode.HTML)
@@ -98,67 +159,26 @@ def register_command_handlers(dp, contest_service: ContestService, admin_ids: li
             f"Чтобы перебить лидера, отправьте любое сообщение "
         )
         sent = await callback.message.answer(timer_text, parse_mode=ParseMode.HTML)
-        contest_service.set_bot_message(sent.message_id)
+        service.set_bot_message(sent.message_id)
 
         await callback.answer()
 
-    # ─── Кнопка: админы НЕ участвуют ───
-    @dp.callback_query(F.data == "admins_no")
-    async def callback_admins_no(callback: CallbackQuery):
-        if callback.from_user.id not in admin_ids:
-            await callback.answer("❌ Только администратор.", show_alert=True)
-            return
-
-        if contest_service.is_active:
-            await callback.answer("⚠️ Игра уже запущена!", show_alert=True)
-            return
-
-        duration = contest_service.state.get("pending_duration", contest_service.duration)
-        prize = contest_service.state.get("prize", "Сюрприз")
-        chat_id = contest_service.state.get("chat_id")
-
-        if not chat_id:
-            await callback.answer("⚠️ Ошибка: чат не найден.", show_alert=True)
-            return
-
-        contest_service.start(chat_id, duration, prize, admins_allowed=False)
-
-        text = (
-            f"🎮 <b>Игра запущена!</b>\n\n"
-            f" Длительность: <b>{format_time_left(duration)}</b>\n"
-            f" Приз: <b>{prize}</b>\n"
-            f"✅ Задача: продержать своё сообщение самым последним, без перебивов.\n\n"
-            f"👥 Участники: <b>Только обычные пользователи</b> (админы и создатель исключены)\n\n"
-            f"Удачи в бою ☘️"
-        )
-
-        await callback.message.edit_text(text, parse_mode=ParseMode.HTML)
-
-        timer_text = (
-            f"⏳ <b>Конкурс!</b>\n\n"
-            f" До конца: <b>{format_time_left(duration)}</b>\n\n"
-            f"Чтобы перебить лидера, отправьте любое сообщение 🚀"
-        )
-        sent = await callback.message.answer(timer_text, parse_mode=ParseMode.HTML)
-        contest_service.set_bot_message(sent.message_id)
-
-        await callback.answer()
-
-    # ─── /play_game (быстрый запуск с админами) ───
     @dp.message(Command("play_game"))
     async def cmd_play_game(message: Message):
         if message.from_user.id not in admin_ids:
             await message.answer("❌ Только администратор.")
             return
 
-        if contest_service.is_active:
-            await message.answer("⚠️ Игра уже идёт! /stop_play")
+        service = contest_manager.get_service(message.chat.id)
+
+        if service.is_active:
+            await message.answer("⚠️ Игра уже идёт в этом чате! /stop_play")
             return
 
-        duration = contest_service.duration
-        prize = contest_service.state.get("prize", "Сюрприз")
+        duration = service.duration
+        prize = service.state.get("prize", "Сюрприз")
 
-        contest_service.start(message.chat.id, duration, prize, admins_allowed=True)
+        service.start(message.chat.id, duration, prize, admins_allowed=True)
 
         text = (
             f"🎮 <b>Игра запущена!</b>\n\n"
@@ -169,40 +189,40 @@ def register_command_handlers(dp, contest_service: ContestService, admin_ids: li
             f"Удачи в бою ☘️"
         )
         sent = await message.answer(text, parse_mode=ParseMode.HTML)
-        contest_service.set_start_message(sent.message_id)
+        service.set_start_message(sent.message_id)
 
         timer_text = (
-            f"⏳ <b>Конкурс!</b>\n\n"
+            f" <b>Конкурс!</b>\n\n"
             f"⏰ До конца: <b>{format_time_left(duration)}</b>\n\n"
-            f"Чтобы перебить лидера, отправьте любое сообщение "
+            f"Чтобы перебить лидера, отправьте любое сообщение 🚀"
         )
         timer_sent = await message.answer(timer_text, parse_mode=ParseMode.HTML)
-        contest_service.set_bot_message(timer_sent.message_id)
+        service.set_bot_message(timer_sent.message_id)
 
-        # Удаляем сообщение с командой
         try:
             await message.delete()
         except Exception:
             pass
 
-    # ─── /block_admin (быстрый запуск без админов) ──
     @dp.message(Command("block_admin"))
     async def cmd_block_admin(message: Message):
         if message.from_user.id not in admin_ids:
             await message.answer("❌ Только администратор.")
             return
 
-        if contest_service.is_active:
-            await message.answer("⚠️ Игра уже идёт! /stop_play")
+        service = contest_manager.get_service(message.chat.id)
+
+        if service.is_active:
+            await message.answer("️ Игра уже идёт в этом чате! /stop_play")
             return
 
-        duration = contest_service.duration
-        prize = contest_service.state.get("prize", "Сюрприз")
+        duration = service.duration
+        prize = service.state.get("prize", "Сюрприз")
 
-        contest_service.start(message.chat.id, duration, prize, admins_allowed=False)
+        service.start(message.chat.id, duration, prize, admins_allowed=False)
 
         text = (
-            f" <b>Игра запущена!</b>\n\n"
+            f"🎮 <b>Игра запущена!</b>\n\n"
             f"⏱ Длительность: <b>{format_time_left(duration)}</b>\n"
             f"🎁 Приз: <b>{prize}</b>\n"
             f"✅ Задача: продержать своё сообщение самым последним, без перебивов.\n\n"
@@ -210,65 +230,60 @@ def register_command_handlers(dp, contest_service: ContestService, admin_ids: li
             f"Удачи в бою ☘️"
         )
         sent = await message.answer(text, parse_mode=ParseMode.HTML)
-        contest_service.set_start_message(sent.message_id)
+        service.set_start_message(sent.message_id)
 
         timer_text = (
             f"⏳ <b>Конкурс!</b>\n\n"
             f"⏰ До конца: <b>{format_time_left(duration)}</b>\n\n"
-            f"Чтобы перебить лидера, отправьте любое сообщение 🚀"
+            f"Чтобы перебить лидера, отправьте любое сообщение "
         )
         timer_sent = await message.answer(timer_text, parse_mode=ParseMode.HTML)
-        contest_service.set_bot_message(timer_sent.message_id)
+        service.set_bot_message(timer_sent.message_id)
 
-        # Удаляем сообщение с командой
         try:
             await message.delete()
         except Exception:
             pass
 
-    # ─── /stop_play ───
     @dp.message(Command("stop_play"))
     async def cmd_stop_play(message: Message):
         if message.from_user.id not in admin_ids:
             await message.answer("❌ Только администратор.")
             return
 
-        contest_service.stop()
+        service = contest_manager.get_service(message.chat.id)
 
-        try:
-            await message.bot.set_chat_permissions(
-                chat_id=message.chat.id,
-                permissions=ChatPermissions(can_send_messages=True),
-            )
-        except Exception:
-            pass
+        if not service.is_active:
+            await message.answer("Игра не активна в этом чате.")
+            return
+
+        service.stop()
 
         await message.answer("🛑 Перебив завершён.")
 
-        # Удаляем сообщение с командой
         try:
             await message.delete()
         except Exception:
             pass
 
-    # ─── /status ───
     @dp.message(Command("status"))
     async def cmd_status(message: Message):
-        if not contest_service.is_active:
-            await message.answer("Игра не активна. /start_play")
+        service = contest_manager.get_service(message.chat.id)
+
+        if not service.is_active:
+            await message.answer("Игра не активна в этом чате. /start_play")
             return
 
-        remaining = contest_service.get_remaining_seconds()
-        admins_text = "Все" if contest_service.state["admins_allowed"] else "Только обычные"
+        remaining = service.get_remaining_seconds()
+        admins_text = "Все" if service.state["admins_allowed"] else "Только обычные"
         await message.answer(
-            f" <b>Статус игры</b>\n\n"
-            f"👑 Лидер: @{contest_service.state['leader_username'] or 'неизвестно'}\n"
-            f" Осталось: {format_time_left(int(remaining))}\n"
+            f"📊 <b>Статус игры</b>\n\n"
+            f"👑 Лидер: @{service.state['leader_username'] or 'неизвестно'}\n"
+            f"⏰ Осталось: {format_time_left(int(remaining))}\n"
             f"👥 Участники: {admins_text}",
             parse_mode=ParseMode.HTML,
         )
 
-        # Удаляем сообщение с командой
         try:
             await message.delete()
         except Exception:
