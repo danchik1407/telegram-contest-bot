@@ -4,7 +4,8 @@ import time
 import html as html_module
 import logging
 from aiogram import F
-from aiogram.types import Message, ChatMemberStatus
+from aiogram.types import Message
+from aiogram.enums import ChatMemberStatus
 from aiogram.filters import Command
 
 from services.economy import load_data, save_data, get_or_create_user, format_time
@@ -84,7 +85,7 @@ def register_economy_handlers(dp, bot):
             user["last_chest"] = now
             save_data(data)
             if is_golden:
-                await message.answer(f"✨ <b>ЗОЛОТОЙ СУНДУК!</b> 🔑\n💥 Тебе выпало: <b>{reward}</b> coin ",
+                await message.answer(f"✨ <b>ЗОЛОТОЙ СУНДУК!</b> 🔑\n💥 Тебе выпало: <b>{reward}</b> coin 🪙",
                                      parse_mode="HTML")
             else:
                 await message.answer(f"🎁 <b>Сундук открыт!</b>\n🎉 Тебе выпало: <b>{reward}</b> coin 🪙",
@@ -174,13 +175,13 @@ def register_economy_handlers(dp, bot):
                 await message.answer("❌ Нельзя переводить самому себе!");
                 return
             if sender["coins"] < amount:
-                await message.answer(f" Недостаточно монет. У тебя: {sender['coins']} 🪙");
+                await message.answer(f"❌ Недостаточно монет. У тебя: {sender['coins']} 🪙");
                 return
             target_data = get_or_create_user(data, target_user.id, target_user.username)
             sender["coins"] -= amount
             target_data["coins"] += amount
             save_data(data)
-            await message.answer(f"✅ <b>Перевод выполнен!</b>\n💸 Сумма: <b>{amount}</b> ", parse_mode="HTML")
+            await message.answer(f"✅ <b>Перевод выполнен!</b>\n💸 Сумма: <b>{amount}</b> 🪙", parse_mode="HTML")
         except Exception as e:
             logger.error(f"Ошибка /transfer: {e}")
 
@@ -211,7 +212,7 @@ def register_economy_handlers(dp, bot):
                             target_user = type('User', (), {'id': int(uid_str), 'username': udata.get("username")})()
                             break
             if not target_user or amount <= 0:
-                await message.answer(" Формат: <code>/dice @user сумма</code>", parse_mode="HTML");
+                await message.answer("🎲 Формат: <code>/dice @user сумма</code>", parse_mode="HTML");
                 return
             if target_user.id == message.from_user.id:
                 await message.answer("❌ Нельзя играть с собой!");
@@ -233,7 +234,7 @@ def register_economy_handlers(dp, bot):
                                  parse_mode="HTML")
             dice1 = await bot.send_dice(chat_id=message.chat.id, emoji="🎲")
             await asyncio.sleep(2)
-            dice2 = await bot.send_dice(chat_id=message.chat.id, emoji="")
+            dice2 = await bot.send_dice(chat_id=message.chat.id, emoji="🎲")
             await asyncio.sleep(1)
             v1, v2 = dice1.dice.value, dice2.dice.value
             if v1 > v2:
@@ -241,7 +242,7 @@ def register_economy_handlers(dp, bot):
                 res = f"🏆 <b>Победил {c_name}!</b> ({v1} vs {v2})\n+{amount * 2} 🪙"
             elif v2 > v1:
                 challenged["coins"] += amount * 2
-                res = f" <b>Победил {d_name}!</b> ({v1} vs {v2})\n+{amount * 2} 🪙"
+                res = f"🏆 <b>Победил {d_name}!</b> ({v1} vs {v2})\n+{amount * 2} 🪙"
             else:
                 challenger["coins"] += amount
                 challenged["coins"] += amount
@@ -293,7 +294,7 @@ def register_economy_handlers(dp, bot):
                 await message.answer("❌ Админы не найдены.");
                 return
             mentions = [f"[{u.full_name[:20]}](tg://user?id={u.id})" for u in admins]
-            await message.answer(f" {call_text}\n\n" + ", ".join(mentions), parse_mode="Markdown")
+            await message.answer(f"📢 {call_text}\n\n" + ", ".join(mentions), parse_mode="Markdown")
         except Exception as e:
             logger.error(f"Ошибка /admins: {e}")
 
@@ -335,7 +336,7 @@ def register_economy_handlers(dp, bot):
     @dp.message(Command("changeme"))
     async def cmd_changeme(message: Message):
         try:
-            emojis = ["🔥", "💎", "🐺", "", "🐻", "🦁", "🐯", "🐲", "👻", "🤖", "", "🎯", "💀", "👑", "🎭", "", "🦈", "🐍"]
+            emojis = ["🔥", "💎", "🐺", "🦊", "🐻", "🦁", "🐯", "🐲", "👻", "🤖", "👽", "🎯", "💀", "👑", "🎭", "🦅", "🦈", "🐍"]
             emoji = random.choice(emojis)
             data = load_data()
             user = get_or_create_user(data, message.from_user.id, message.from_user.username)
