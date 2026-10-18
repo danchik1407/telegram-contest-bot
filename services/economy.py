@@ -5,7 +5,6 @@ from typing import Dict, Any, Optional
 
 DATA_FILE = "data.json"
 
-
 def load_data() -> Dict[str, Any]:
     if not os.path.exists(DATA_FILE):
         return {"users": {}}
@@ -19,7 +18,6 @@ def load_data() -> Dict[str, Any]:
         print(f"[ECONOMY ERROR] Ошибка чтения data.json: {e}")
         return {"users": {}}
 
-
 def save_data(data: Dict[str, Any]):
     try:
         with open(DATA_FILE, "w", encoding="utf-8") as f:
@@ -27,11 +25,8 @@ def save_data(data: Dict[str, Any]):
     except Exception as e:
         print(f"[ECONOMY ERROR] Ошибка сохранения data.json: {e}")
 
-
-# Монеты ОБЩИЕ для всех чатов (ключ = только ID пользователя)
 def get_or_create_user(data: Dict[str, Any], user_id: int, username: Optional[str]) -> Dict[str, Any]:
     uid_str = str(user_id)
-
     if uid_str not in data["users"]:
         data["users"][uid_str] = {
             "coins": 0,
@@ -44,13 +39,10 @@ def get_or_create_user(data: Dict[str, Any], user_id: int, username: Optional[st
         u = data["users"][uid_str]
         if username:
             u["username"] = username
-        # Защита от старых версий файла
         u.setdefault("last_chest", 0)
         u.setdefault("last_call", 0)
         u.setdefault("call_sign", None)
-
     return data["users"][uid_str]
-
 
 def format_time(seconds: float) -> str:
     h = int(seconds // 3600)
