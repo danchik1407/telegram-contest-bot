@@ -45,6 +45,15 @@ def safe_text(text: str) -> str:
 
 
 def register_economy_handlers(dp, bot):
+    # 🚨 ДЕТЕКТОР: Отвечает на ЛЮБОЕ сообщение с восклицательным знаком
+    @dp.message(lambda m: m.text and m.text.startswith("!"))
+    async def debug_economy(message: Message):
+        logger.info(f"🚨 ПОЙМАНО СООБЩЕНИЕ С ! : '{message.text}' от {message.from_user.id}")
+        try:
+            await message.answer(f"✅ Бот видит твою команду: `{message.text}`", parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Ошибка отправки ответа детектора: {e}")
+
     # 1. ПОМОЩЬ
     @dp.message(lambda m: m.text and m.text.lower().strip() in ["!помощь", "!команды", "!help"])
     async def cmd_help(message: Message):
